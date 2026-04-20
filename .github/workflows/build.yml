@@ -6,7 +6,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-android:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 1: Build libmobileglues.so with CMake + NDK
+  # ──────────────────────────────────────────────────────────────────────────
+  build-native:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -53,33 +56,121 @@ jobs:
                 -DANDROID_STL=c++_static \
                 -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
-      - name: Build
+      - name: Build native library
         run: |
           cmake --build MobileGlues-cpp/build-android-${{ matrix.build_type }} \
                 --target mobileglues \
                 -j$(nproc)
 
-      - name: Upload artifact
+      - name: Upload .so artifact
         uses: actions/upload-artifact@v4
         with:
-          name: libmobileglues-android-arm64-${{ matrix.build_type }}
+          name: libmobileglues-${{ matrix.build_type }}
           path: MobileGlues-cpp/build-android-${{ matrix.build_type }}/libmobileglues.so
 
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 2: Package the Release .so into a ZalithLauncher renderer plugin APK
+  # ──────────────────────────────────────────────────────────────────────────
+  build-plugin:
+    runs-on: ubuntu-latest
+    needs: build-native
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Download Release .so
+        uses: actions/download-artifact@v4
+        with:
+          name: libmobileglues-Release
+          path: so-release/
+
+      - name: Copy .so into plugin jniLibs
+        run: |
+          mkdir -p plugin/app/src/main/jniLibs/arm64-v8a
+          cp so-release/libmobileglues.so \
+             plugin/app/src/main/jniLibs/arm64-v8a/libmobileglues.so
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build tools & platform
+        run: |
+          sdkmanager --sdk_root=$ANDROID_SDK_ROOT \
+            "platforms;android-34" \
+            "build-tools;34.0.0"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Derive version from git tag or commit
+        id: version
+        run: |
+          TAG=$(git describe --tags --exact-match 2>/dev/null || echo "")
+          if [[ "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            VER="${BASH_REMATCH[1]}"
+            BUILD=$(echo "$VER" | awk -F. '{printf "%d%02d%02d", $1,$2,$3}')
+          else
+            VER="0.0.$(git rev-list --count HEAD)"
+            BUILD=$(git rev-list --count HEAD)
+          fi
+          echo "versionName=$VER" >> $GITHUB_OUTPUT
+          echo "versionCode=$BUILD" >> $GITHUB_OUTPUT
+
+      - name: Build plugin APK
+        run: |
+          gradle -p plugin assembleRelease \
+            -PversionName=${{ steps.version.outputs.versionName }} \
+            -PversionCode=${{ steps.version.outputs.versionCode }}
+
+      - name: Rename APK
+        run: |
+          cp plugin/app/build/outputs/apk/release/app-release.apk \
+             MobileGlues-Adreno-plugin.apk
+
+      - name: Upload plugin APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MobileGlues-Adreno-plugin
+          path: MobileGlues-Adreno-plugin.apk
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 3: Publish GitHub Release on v* tags
+  # ──────────────────────────────────────────────────────────────────────────
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build-android
+    needs: [build-native, build-plugin]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
     steps:
-      - name: Download Release artifact
+      - name: Download plugin APK
         uses: actions/download-artifact@v4
         with:
-          name: libmobileglues-android-arm64-Release
+          name: MobileGlues-Adreno-plugin
+          path: release-artifacts/
+
+      - name: Download Release .so (for advanced users)
+        uses: actions/download-artifact@v4
+        with:
+          name: libmobileglues-Release
           path: release-artifacts/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release-artifacts/libmobileglues.so
+          files: |
+            release-artifacts/MobileGlues-Adreno-plugin.apk
+            release-artifacts/libmobileglues.so
           generate_release_notes: true
