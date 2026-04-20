@@ -6,6 +6,7 @@
 // End of Source File Header
 
 #include "config/settings.h"
+#include "core/gpu_detect.h"
 #include "egl/egl.h"
 #include "egl/loader.h"
 #include "gl/envvars.h"
@@ -62,6 +63,10 @@ void proc_init() {
     load_libs();
     init_target_egl();
     init_target_gles();
+
+    gpu_detect::init();
+    gpu_detect::log_capabilities();
+
     set_multidraw_setting();
 
     init_settings_post();

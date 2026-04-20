@@ -88,6 +88,7 @@ set(PROFILING OFF)
 add_library(${CMAKE_PROJECT_NAME} SHARED
     init.cpp
     main.cpp
+    core/gpu_detect.cpp
     gl/gl_stub.cpp
     gl/gl_native.cpp
     gl/gl.cpp
