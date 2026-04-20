@@ -126,6 +126,16 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ./includes
     ./3rdparty/glm
     ./3rdparty/xxhash)
+
+# On Android the NDK sysroot contains complete, up-to-date Vulkan headers
+# (including vk_video/).  We add the sysroot include path BEFORE our local
+# include/ so that the NDK's vulkan.h takes precedence over the outdated
+# local copy in include/vulkan/.
+if(ANDROID)
+    target_include_directories(${CMAKE_PROJECT_NAME} BEFORE PUBLIC
+        ${CMAKE_SYSROOT}/usr/include)
+endif()
+
 target_include_directories(${CMAKE_PROJECT_NAME} PUBLIC ${CMAKE_SOURCE_DIR}/include)
 
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
